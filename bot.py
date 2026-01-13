@@ -1,15 +1,15 @@
 import random
 import asyncio
 import aiohttp
+import os
 from telethon import TelegramClient, events
 from aiohttp import web
-import os
 
 api_id = 33100781
 api_hash = "851e421911ca88d83e20e276c953453c"
 phone = "+79897939606"
 BOT_TOKEN = "8275700528:AAECybc5-QPbiXS4ZO9NmJ_-Hapk_GnexI0"
-CHAT_ID = -1001183977989
+CHAT_ID = -1003204357813
 BOT_USERNAME = "retransforgamebot"
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
@@ -19,7 +19,19 @@ VOID_API_KEY = "sk-voidai-Io4dDslOL7WKyFsYZk5gYR15AjIcCZ4XU0wjPImO1ke-i5cSjdctY5
 VOID_API_URL = "https://api.voidai.app/v1/chat/completions"
 VOID_MODEL = "gpt-5.1"  # пример, поменяешь если надо
 
-client = TelegramClient("retransforgamebot", api_id, api_hash, sequential_updates=True)
+user_client = TelegramClient(
+    "user_reader",
+    api_id,
+    api_hash,
+    sequential_updates=True
+)
+
+# bot ТОЛЬКО отправляет
+bot_client = TelegramClient(
+    "bot_sender",
+    api_id,
+    api_hash
+)
 
 # ---------------- MEMORY --------------------------
 
@@ -62,25 +74,25 @@ async def ask_llm(prompt: str) -> str:
                     return "Что-то пошло не так 😭"
 
                 data = await resp.json()
-                content = data["choices"][0]["message"]["content"].strip()
-                return content or "я пизда тупая добавь мне токены 😭"
+                return (
+                    data["choices"][0]["message"]["content"].strip()
+                    or "я пизда тупая добавь мне токены 😭"
+                )
 
-    except asyncio.TimeoutError:
-        return "Сервер думает слишком долго 😭"
     except Exception as e:
         print("LLM error:", e)
         return "Что-то сломалось 😭"
 
 # ---------------- PROMPT --------------------------
 
-def build_prompt(username: str, text: str, base_prompt: str) -> str:
-    history_block = "\n".join(chat_history[-MAX_HISTORY:])
-    return f"""{base_prompt}
+def build_prompt(username: str, text: str) -> str:
+    history = "\n".join(chat_history[-MAX_HISTORY:])
+    return f"""{current_prompt}
 
 Не говори что ты бот или ИИ.
 
-Вот история чата:
-{history_block}
+История чата:
+{history}
 
 Новое сообщение от @{username}: "{text}"
 
@@ -90,12 +102,12 @@ def build_prompt(username: str, text: str, base_prompt: str) -> str:
 # ---------------- TRIGGERS ------------------------
 
 TRIGGERS_CALL = [
-    "@retransforgamebot", "бот", "ботик", "эй", "помоги", "вопрос"
+    f"@{BOT_USERNAME}", "бот", "ботик", "эй", "помоги", "вопрос"
 ]
 
 TRIGGERS_EMO = [
-    "бля", "пиздец", "устал", "устала", "плохо",
-    "груст", "тяжко", "капец", "не понимаю"
+    "бля", "пиздец", "устал", "устала",
+    "плохо", "груст", "тяжко", "капец"
 ]
 
 def should_reply(username: str, text: str) -> bool:
@@ -112,79 +124,36 @@ def should_reply(username: str, text: str) -> bool:
 
     return random.random() < 0.1
 
-# ---------------- SEND ----------------------------
+# ---------------- SEND (BOT ONLY) -----------------
 
-async def send_message_tg(text: str):
-    await client.send_message(CHAT_ID, text)
+async def bot_send(text: str):
+    await bot_client.send_message(CHAT_ID, text)
 
-# ---------------- HANDLER -------------------------
+# ---------------- HANDLER (USER ONLY) -------------
 
-@client.on(events.NewMessage(chats=CHAT_ID))
+@user_client.on(events.NewMessage(chats=CHAT_ID))
 async def handler(event):
-    print("EVENT:", event.chat_id, event.raw_text)
-    global current_prompt, chat_history
-
     sender = await event.get_sender()
     username = (sender.username or "").lower()
     text = event.raw_text or ""
 
-    print(f"\n>>> @{username}: {text}")
+    print(f">>> @{username}: {text}")
 
-    # /help
-    if text == "/help@retransforgamebot":
-        await send_message_tg(
-            "Привет долбаеб! Спроси меня что угодно 😘"
-        )
-        return
-
-    # /setprompt
-    if text.startswith("/setprompt@retransforgamebot"):
-        parts = text.split(" ", 1)
-        if len(parts) > 1 and parts[1].strip():
-            current_prompt = parts[1].strip()
-            chat_history.clear()
-            await send_message_tg(f"Промт обновлён:\n{current_prompt}")
-        else:
-            await send_message_tg("Промт не может быть пустым")
-        return
-
-    # /resetprompt
-    if text == "/resetprompt@retransforgamebot":
-        current_prompt = "Ты — максимально отбитый, матерый зек при этом романтичный бандит."
-        chat_history.clear()
-        await send_message_tg("Промт сброшен")
-        return
-
-    # /showprompt
-    if text == "/showprompt@retransforgamebot":
-        await send_message_tg(f"Текущий промт:\n{current_prompt}")
-        return
-
-    # томат
-    if "томат" in text.lower() and username != BOT_USERNAME.lower():
-        await send_message_tg("Томат лучший <3")
-        return
-
-    # memory
     chat_history.append(f"{username}: {text}")
     if len(chat_history) > MAX_HISTORY:
         chat_history.pop(0)
 
     if not should_reply(username, text):
-        print("бот решил промолчать")
         return
 
-    print("бот отвечает...")
-
-    prompt = build_prompt(username, text, current_prompt)
+    prompt = build_prompt(username, text)
     answer = await ask_llm(prompt)
 
     print("<<< BOT:", answer)
-
-    await send_message_tg(answer)
+    await bot_send(answer)
     await asyncio.sleep(1.5)
 
-# ---------------- START ---------------------------
+# ---------------- HEALTH SERVER -------------------
 
 async def healthcheck(request):
     return web.Response(text="ok")
@@ -202,11 +171,20 @@ async def start_health_server():
 
     print(f"🌍 Health server listening on port {port}")
 
+# ---------------- START ---------------------------
+
 async def main():
     await start_health_server()
-    await client.start(bot_token=BOT_TOKEN)
-    print(f"⚡ {VOID_MODEL} чат-тян запущена")
-    await client.run_until_disconnected()
 
+    await user_client.start(phone=phone)
+    print("👤 user-client connected")
+
+    await bot_client.start(bot_token=BOT_TOKEN)
+    print("🤖 bot-client connected")
+
+    await asyncio.gather(
+        user_client.run_until_disconnected(),
+        bot_client.run_until_disconnected(),
+    )
 
 asyncio.run(main())
