@@ -6,6 +6,9 @@ from telethon import TelegramClient, events
 import atexit
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from telethon.sessions import StringSession
+import os
+
 
 api_id = 33100781
 api_hash = "851e421911ca88d83e20e276c953453c"
@@ -21,7 +24,13 @@ VOID_API_KEY = "sk-voidai-Io4dDslOL7WKyFsYZk5gYR15AjIcCZ4XU0wjPImO1ke-i5cSjdctY5
 VOID_API_URL = "https://api.voidai.app/v1/chat/completions"
 VOID_MODEL = "gpt-5.1"  # пример, поменяешь если надо
 
-client = TelegramClient("boychat", api_id, api_hash)
+SESSION = os.environ["TG_SESSION"]
+
+client = TelegramClient(
+    StringSession(SESSION),
+    api_id,
+    api_hash
+)
 
 # ---------------- ПАМЯТЬ --------------------------
 chat_history = []
