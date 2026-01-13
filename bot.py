@@ -19,7 +19,7 @@ VOID_API_KEY = "sk-voidai-Io4dDslOL7WKyFsYZk5gYR15AjIcCZ4XU0wjPImO1ke-i5cSjdctY5
 VOID_API_URL = "https://api.voidai.app/v1/chat/completions"
 VOID_MODEL = "gpt-5.1"  # пример, поменяешь если надо
 
-client = TelegramClient("boychat", api_id, api_hash, sequential_updates=True)
+client = TelegramClient("retransforgamebot", api_id, api_hash, sequential_updates=True)
 
 # ---------------- MEMORY --------------------------
 
