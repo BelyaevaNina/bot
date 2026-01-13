@@ -2,10 +2,9 @@ import random
 import time
 import requests
 import json
+import asyncio
 from telethon import TelegramClient, events
 import atexit
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
 
 api_id = 33100781
 api_hash = "851e421911ca88d83e20e276c953453c"
@@ -21,68 +20,61 @@ VOID_API_KEY = "sk-voidai-Io4dDslOL7WKyFsYZk5gYR15AjIcCZ4XU0wjPImO1ke-i5cSjdctY5
 VOID_API_URL = "https://api.voidai.app/v1/chat/completions"
 VOID_MODEL = "gpt-5.1"  # пример, поменяешь если надо
 
-client = TelegramClient("boychat", api_id, api_hash)
+client = TelegramClient("boychat", api_id, api_hash,
+    sequential_updates=True)
+loop = asyncio.get_event_loop()
 
-# ---------------- ПАМЯТЬ --------------------------
+# ---------------- MEMORY --------------------------
+
 chat_history = []
 MAX_HISTORY = 10
 
-# ---------------- АНТИ-ФЛУД -----------------------
-LAST_REPLY_TIME = 0
-MIN_REPLY_DELAY = 3.0   # сек между ответами
-
-# Инициализация переменной current_prompt
 current_prompt = "Ты милая няшка стесняшка. Максимум 3 предложения"
-# ---------------- LLM: QWEN3 1.7B ---------------------
-def ask_llm(prompt: str) -> str:
+
+# ---------------- LLM -----------------------------
+
+def ask_llm_sync(prompt: str) -> str:
     headers = {
         "Authorization": f"Bearer {VOID_API_KEY}",
         "Content-Type": "application/json"
     }
 
     data = {
-        "model": VOID_MODEL,  # Используем новую модель gpt-5.2-chat-latest
+        "model": VOID_MODEL,
         "messages": [
             {"role": "system", "content": "Привет бот"},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.9,  # Сделаем более творческий ответ
-        "max_tokens": 500,    # Увеличиваем количество токенов
-        "top_p": 0.9,         # Лучшая вероятность интересных ответов
-        "n": 1                # Количество вариантов ответа
+        "temperature": 0.9,
+        "max_tokens": 500,
+        "top_p": 0.9,
+        "n": 1
     }
 
     try:
-        # Отправка запроса
-        response = requests.post(VOID_API_URL, json=data, headers=headers, timeout=40)
+        r = requests.post(VOID_API_URL, json=data, headers=headers, timeout=40)
+        print("LLM status:", r.status_code)
 
-        # Логирование полного ответа
-        print(f"Status Code: {response.status_code}")
-        print(f"Response Text: {response.text}")
+        if r.status_code == 200:
+            content = r.json()["choices"][0]["message"]["content"].strip()
+            return content or "я зависла, прости 😭"
+        return "что-то пошло не так 😭"
+    except Exception as e:
+        print("LLM error:", e)
+        return "мне плохо, попробуй позже 😭"
 
-        if response.status_code == 200:
-            response_json = response.json()
-            content = response_json["choices"][0]["message"]["content"].strip()
-            if not content:
-                return "я пизда тупая добавь мне токены 😭"
-            return content
-        else:
-            print(f"Ошибка от VoidAI: {response.status_code}")
-            return "Что-то пошло не так 😭"
-    except requests.exceptions.RequestException as e:
-        print(f"Ошибка при подключении к VoidAI: {e}")
-        return "Что-то пошло не так, подожди немного... 😭"
+async def ask_llm(prompt: str) -> str:
+    return await loop.run_in_executor(None, ask_llm_sync, prompt)
 
-# ---------------- ПРОМПТ --------------------------
+# ---------------- PROMPT --------------------------
 
-# ---------------- ПРОМПТ --------------------------
-def build_prompt(username, text, prompt):
+def build_prompt(username, text):
     history_block = "\n".join(chat_history[-MAX_HISTORY:])
-    return f"""{prompt}
+    return f"""{current_prompt}
 
 Не говори что ты бот или ИИ.
 
-Вот история чата:
+История чата:
 {history_block}
 
 Новое сообщение от @{username}: "{text}"
@@ -90,17 +82,15 @@ def build_prompt(username, text, prompt):
 Ответь от первого лица.
 """
 
-# ---------------- ТРИГГЕРЫ ------------------------
+# ---------------- TRIGGERS ------------------------
 
 TRIGGERS_CALL = [
-    "@retransforgamebot", "бот", "ботик", "эй", "помоги", "вопрос", "Вопрос"
+    "@retransforgamebot", "бот", "ботик", "эй", "помоги"
 ]
 
 TRIGGERS_EMO = [
-    "бля", "пиздец", 
-    "устал", "устала", "плохо", "груст", "тяжко",
-    "капец", "не понимаю", "непон", 
-    "смешно", 
+    "бля", "пиздец", "устал", "устала", "плохо",
+    "груст", "капец", "не понимаю", "смешно"
 ]
 
 def should_reply(username, text):
@@ -115,122 +105,84 @@ def should_reply(username, text):
     if any(t in txt for t in TRIGGERS_EMO):
         return True
 
-    if random.random() < 0.1:
-        return True
-
-    return False
+    return random.random() < 0.1
 
 # ---------------- SEND ----------------------------
 
-def send_message(text):
-    requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
-        "chat_id": CHAT_ID,
-        "text": text
-    })
+async def send_message(text):
+    await client.send_message(CHAT_ID, text)
 
-# ---------------- TELETHON -------------------------
+# ---------------- HANDLER -------------------------
 
 @client.on(events.NewMessage(chats=CHAT_ID))
 async def handler(event):
-    global LAST_REPLY_TIME, current_prompt, chat_history
+    global chat_history, current_prompt
 
     sender = await event.get_sender()
     username = (sender.username or "").lower()
     text = event.raw_text or ""
 
-    print(f"\n>>> @{username}: {text}")
+    print(f">>> @{username}: {text}")
 
-    # Обработка команды /help
+    # /help
     if text == "/help@retransforgamebot":
-        send_message("Привет долбаеб! Спроси меня что угодно, отзываюсь на @retransforgamebot, 'бот', 'ботик', 'эй', 'помоги'")
+        await send_message(
+            "Привет долбаеб! Спроси меня что угодно. "
+            "Отзываюсь на @retransforgamebot, бот, ботик, эй, помоги"
+        )
         return
 
-# Проверяем, если сообщение соответствует формату /setprompt @retransforgamebot <текст>
+    # /setprompt
     if text.startswith("/setprompt@retransforgamebot"):
-        command_parts = text.split(" ", 1)
-        if len(command_parts) > 1 and command_parts[1].strip():  # Проверяем, если текст после команды не пустой
-            current_prompt = command_parts[1].strip()  # Устанавливаем новый промт
-            chat_history = []  # Очищаем историю чата при изменении промта
-            send_message(f"Промт успешно обновлен на: {current_prompt}")
+        parts = text.split(" ", 1)
+        if len(parts) > 1 and parts[1].strip():
+            current_prompt = " ".join(parts[1].split())
+            chat_history.clear()
+            await send_message("Промт обновлён.")
         else:
-            send_message("Текст для промта не может быть пустым!")
+            await send_message("Текст для промта не может быть пустым.")
         return
 
-    # Сброс промта
-    elif text == "/resetprompt@retransforgamebot":
-        current_prompt = "Ты — максимально отбитый, матерый зек при этом романтичный бандит."
-        chat_history = []  # Очищаем историю чата при сбросе промта
-        send_message("Промт сброшен к исходному состоянию.")
+    # /resetprompt
+    if text == "/resetprompt@retransforgamebot":
+        current_prompt = "Ты милая няшка стесняшка. Максимум 3 предложения"
+        chat_history.clear()
+        await send_message("Промт сброшен.")
         return
 
-    # Показать текущий промт
-    elif text == "/showprompt@retransforgamebot":
-        send_message(f"Текущий промт: {current_prompt}")
+    # /showprompt
+    if text == "/showprompt@retransforgamebot":
+        await send_message(current_prompt)
         return
 
-     # Проверка на "томат" в разных регистрах
-    if "томат" in text.lower() and username != BOT_USERNAME.lower():  # Поиск по слову "томат" (не зависит от регистра)
-        print("Томат найден, бот отвечает...")
-        send_message("Томат лучший <3")
-        return  # Выход из обработчика, чтобы не выполнять дальнейшую обработку
-    
-    if "сглып" in text.lower() and username != BOT_USERNAME.lower():  # Поиск по слову "томат" (не зависит от регистра)
-            print("Сглыпа найден, бот отвечает...")
-            send_message("Сглыпа хуесос")
-            return  # Выход из обработчика, чтобы не выполнять дальнейшую обработку
+    # локальные реакции
+    if "томат" in text.lower():
+        await send_message("Томат лучший <3")
+        return
 
+    # if "сглып" in text.lower():
+    #     await send_message("Сглыпа хуесос")
+    #     return
 
-    # сохраняем в память
+    # память
     chat_history.append(f"{username}: {text}")
     if len(chat_history) > MAX_HISTORY:
         chat_history.pop(0)
 
-    # анти-флуд
-    now = time.time()
-    if now - LAST_REPLY_TIME < MIN_REPLY_DELAY:
-        print("анти-флуд: пропуск")
-        return
-
-    # фильтр реакции
     if not should_reply(username, text):
-        print("бот решил промолчать")
         return
 
-    print("бот отвечает...")
-
-    prompt = build_prompt(username, text, current_prompt)  # Передаем актуальный промт в build_prompt
-    answer = ask_llm(prompt)
+    prompt = build_prompt(username, text)
+    answer = await ask_llm(prompt)
 
     print("<<< BOT:", answer)
+    await send_message(answer)
 
-    send_message(answer)
-    LAST_REPLY_TIME = time.time()
-
-# ---------------- TEST ----------------------------
-
-# Запускаем тест для проверки правильности работы API
-def test_ask_llm():
-    prompt = "Привет, как дела?"
-    response = ask_llm(prompt)
-    print(f"Тестовый ответ: {response}")
-
-# Тестируем работу API
-test_ask_llm()  # Тестируем работу API
+    # мягкий антифлуд
+    await asyncio.sleep(1.5)
 
 # ---------------- START ---------------------------
-client.start(phone=phone)
-print(f"⚡ {VOID_MODEL} чат-тян запущена — отвечает быстро и по делу.")
 
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
-
-def run_health_server():
-    server = HTTPServer(("0.0.0.0", 8000), HealthHandler)
-    server.serve_forever()
-
-threading.Thread(target=run_health_server, daemon=True).start()
-
+print("⚡ бот запускается")
+client.start()
 client.run_until_disconnected()
