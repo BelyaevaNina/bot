@@ -4,6 +4,8 @@ import requests
 import json
 from telethon import TelegramClient, events
 import atexit
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 api_id = 33100781
 api_hash = "851e421911ca88d83e20e276c953453c"
@@ -218,4 +220,17 @@ test_ask_llm()  # Тестируем работу API
 # ---------------- START ---------------------------
 client.start(phone=phone)
 print(f"⚡ {VOID_MODEL} чат-тян запущена — отвечает быстро и по делу.")
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def run_health_server():
+    server = HTTPServer(("0.0.0.0", 8000), HealthHandler)
+    server.serve_forever()
+
+threading.Thread(target=run_health_server, daemon=True).start()
+
 client.run_until_disconnected()
