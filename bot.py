@@ -11,6 +11,7 @@ phone = "+79897939606"
 BOT_TOKEN = "8275700528:AAECybc5-QPbiXS4ZO9NmJ_-Hapk_GnexI0"
 CHAT_ID = -1003204357813
 BOT_USERNAME = "retransforgamebot"
+BOT_ID = None
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 SEND_API = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -154,7 +155,7 @@ async def handler(event):
     sender = await event.get_sender()
 
     # игнорируем всех ботов (включая нашего)
-    if sender.bot:
+    if sender.id == BOT_ID:
         return
 
     username = (sender.username or "").lower()
@@ -207,6 +208,8 @@ async def start_health_server():
 # ---------------- START ---------------------------
 
 async def main():
+    global BOT_ID
+
     await start_health_server()
 
     await user_client.start(phone=phone)
@@ -216,6 +219,9 @@ async def main():
     await bot_client.start(bot_token=BOT_TOKEN)
     print("🤖 BOT CLIENT CONNECTED")
 
+    bot_me = await bot_client.get_me()
+    BOT_ID = bot_me.id
+    
     await asyncio.gather(
         user_client.run_until_disconnected(),
         bot_client.run_until_disconnected(),
