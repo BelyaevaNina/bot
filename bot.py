@@ -158,34 +158,6 @@ async def handler(event):
 
     print(f">>> @{username}: {text}")
 
-      # Обработка команды /help
-    if text == "/help@retransforgamebot":
-        await bot_send("Привет долбаеб! Спроси меня что угодно, отзываюсь на @retransforgamebot, 'бот', 'ботик', 'эй', 'помоги'")
-        return
-
-# Проверяем, если сообщение соответствует формату /setprompt @retransforgamebot <текст>
-    if text.startswith("/setprompt@retransforgamebot"):
-        command_parts = text.split(" ", 1)
-        if len(command_parts) > 1 and command_parts[1].strip():  # Проверяем, если текст после команды не пустой
-            current_prompt = command_parts[1].strip()  # Устанавливаем новый промт
-            chat_history = []  # Очищаем историю чата при изменении промта
-            await bot_send(f"Промт успешно обновлен на: {current_prompt}")
-        else:
-            await bot_send("Текст для промта не может быть пустым!")
-        return
-
-    # Сброс промта
-    elif text == "/resetprompt@retransforgamebot":
-        current_prompt = "Ты — максимально отбитый, матерый зек при этом романтичный бандит."
-        chat_history = []  # Очищаем историю чата при сбросе промта
-        await bot_send("Промт сброшен к исходному состоянию.")
-        return
-
-    # Показать текущий промт
-    elif text == "/showprompt@retransforgamebot":
-        await bot_send(f"Текущий промт: {current_prompt}")
-        return
-
     chat_history.append(f"{username}: {text}")
     if len(chat_history) > MAX_HISTORY:
         chat_history.pop(0)
