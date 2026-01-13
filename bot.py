@@ -177,15 +177,13 @@ async def handler(event):
     await bot_send(answer)
     await asyncio.sleep(1.5)
 
-# ---------------- CONNECTION LOGS -----------------
-
-@user_client.on(events.Connected)
-async def on_user_connect(event):
-    print("✅ USER CLIENT CONNECTED")
-
-@user_client.on(events.Disconnected)
-async def on_user_disconnect(event):
-    print("⚠️ USER CLIENT DISCONNECTED")
+async def user_alive_monitor():
+    while True:
+        try:
+            await user_client.get_me()
+        except Exception as e:
+            print("⚠️ USER CLIENT LOST:", e)
+        await asyncio.sleep(30)
 
 # ---------------- HEALTH SERVER -------------------
 
@@ -219,9 +217,11 @@ async def main():
     await bot_client.start(bot_token=BOT_TOKEN)
     print("🤖 BOT CLIENT CONNECTED")
 
+    asyncio.create_task(user_alive_monitor())
+
     bot_me = await bot_client.get_me()
     BOT_ID = bot_me.id
-    
+
     await asyncio.gather(
         user_client.run_until_disconnected(),
         bot_client.run_until_disconnected(),
