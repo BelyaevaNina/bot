@@ -174,6 +174,8 @@ async def start_health_server():
 # ---------------- START ---------------------------
 
 async def main():
+    print("CWD:", os.getcwd())
+    print("FILES:", os.listdir("."))
     await start_health_server()
 
     await user_client.start(phone=phone)
