@@ -121,6 +121,7 @@ async def send_message_tg(text: str):
 
 @client.on(events.NewMessage(chats=CHAT_ID))
 async def handler(event):
+    print("EVENT:", event.chat_id, event.raw_text)
     global current_prompt, chat_history
 
     sender = await event.get_sender()
@@ -203,7 +204,7 @@ async def start_health_server():
 
 async def main():
     await start_health_server()
-    await client.start(phone=phone)
+    await client.start(bot_token=BOT_TOKEN)
     print(f"⚡ {VOID_MODEL} чат-тян запущена")
     await client.run_until_disconnected()
 
