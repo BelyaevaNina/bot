@@ -19,18 +19,21 @@ VOID_API_KEY = "sk-voidai-Io4dDslOL7WKyFsYZk5gYR15AjIcCZ4XU0wjPImO1ke-i5cSjdctY5
 VOID_API_URL = "https://api.voidai.app/v1/chat/completions"
 VOID_MODEL = "gpt-5.1"  # пример, поменяешь если надо
 
+# ---------------- CLIENTS -------------------------
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 user_client = TelegramClient(
-    "user_reader",
+    os.path.join(BASE_DIR, "user_reader"),
     api_id,
     api_hash,
-    sequential_updates=True
+    sequential_updates=True,
 )
 
-# bot ТОЛЬКО отправляет
 bot_client = TelegramClient(
-    "bot_sender",
+    os.path.join(BASE_DIR, "bot_sender"),
     api_id,
-    api_hash
+    api_hash,
 )
 
 # ---------------- MEMORY --------------------------
@@ -45,19 +48,19 @@ current_prompt = "Ты милая няшка стесняшка. Максиму�
 async def ask_llm(prompt: str) -> str:
     headers = {
         "Authorization": f"Bearer {VOID_API_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
     payload = {
         "model": VOID_MODEL,
         "messages": [
             {"role": "system", "content": "Привет бот"},
-            {"role": "user", "content": prompt}
+            {"role": "user", "content": prompt},
         ],
         "temperature": 0.9,
         "max_tokens": 500,
         "top_p": 0.9,
-        "n": 1
+        "n": 1,
     }
 
     try:
@@ -66,21 +69,21 @@ async def ask_llm(prompt: str) -> str:
                 VOID_API_URL,
                 json=payload,
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=40)
+                timeout=aiohttp.ClientTimeout(total=40),
             ) as resp:
 
                 if resp.status != 200:
-                    print("VoidAI error:", resp.status)
+                    print("❌ VoidAI status:", resp.status)
                     return "Что-то пошло не так 😭"
 
                 data = await resp.json()
                 return (
                     data["choices"][0]["message"]["content"].strip()
-                    or "я пизда тупая добавь мне токены 😭"
+                    or "я зависла и покраснела 😭"
                 )
 
     except Exception as e:
-        print("LLM error:", e)
+        print("❌ LLM error:", e)
         return "Что-то сломалось 😭"
 
 # ---------------- PROMPT --------------------------
@@ -102,12 +105,23 @@ def build_prompt(username: str, text: str) -> str:
 # ---------------- TRIGGERS ------------------------
 
 TRIGGERS_CALL = [
-    f"@{BOT_USERNAME}", "бот", "ботик", "эй", "помоги", "вопрос"
+    f"@{BOT_USERNAME}",
+    "бот",
+    "ботик",
+    "эй",
+    "помоги",
+    "вопрос",
 ]
 
 TRIGGERS_EMO = [
-    "бля", "пиздец", "устал", "устала",
-    "плохо", "груст", "тяжко", "капец"
+    "бля",
+    "пиздец",
+    "устал",
+    "устала",
+    "плохо",
+    "груст",
+    "тяжко",
+    "капец",
 ]
 
 def should_reply(username: str, text: str) -> bool:
@@ -124,16 +138,25 @@ def should_reply(username: str, text: str) -> bool:
 
     return random.random() < 0.1
 
-# ---------------- SEND (BOT ONLY) -----------------
+# ---------------- BOT SEND ------------------------
 
 async def bot_send(text: str):
     await bot_client.send_message(CHAT_ID, text)
 
-# ---------------- HANDLER (USER ONLY) -------------
+# ---------------- HANDLER (USER READS) ------------
 
-@user_client.on(events.NewMessage(chats=CHAT_ID))
+@user_client.on(events.NewMessage)
 async def handler(event):
+    # фильтр по чату
+    if event.chat_id != CHAT_ID:
+        return
+
     sender = await event.get_sender()
+
+    # игнорируем всех ботов (включая нашего)
+    if sender.bot:
+        return
+
     username = (sender.username or "").lower()
     text = event.raw_text or ""
 
@@ -152,6 +175,16 @@ async def handler(event):
     print("<<< BOT:", answer)
     await bot_send(answer)
     await asyncio.sleep(1.5)
+
+# ---------------- CONNECTION LOGS -----------------
+
+@user_client.on(events.Connected)
+async def on_user_connect(event):
+    print("✅ USER CLIENT CONNECTED")
+
+@user_client.on(events.Disconnected)
+async def on_user_disconnect(event):
+    print("⚠️ USER CLIENT DISCONNECTED")
 
 # ---------------- HEALTH SERVER -------------------
 
@@ -174,15 +207,14 @@ async def start_health_server():
 # ---------------- START ---------------------------
 
 async def main():
-    print("CWD:", os.getcwd())
-    print("FILES:", os.listdir("."))
     await start_health_server()
 
     await user_client.start(phone=phone)
-    print("👤 user-client connected")
+    me = await user_client.get_me()
+    print("👤 USER LOGGED IN AS:", me.id, me.username)
 
     await bot_client.start(bot_token=BOT_TOKEN)
-    print("🤖 bot-client connected")
+    print("🤖 BOT CLIENT CONNECTED")
 
     await asyncio.gather(
         user_client.run_until_disconnected(),
