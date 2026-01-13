@@ -2,6 +2,8 @@ import random
 import asyncio
 import aiohttp
 from telethon import TelegramClient, events
+from aiohttp import web
+import os
 
 api_id = 33100781
 api_hash = "851e421911ca88d83e20e276c953453c"
@@ -183,9 +185,27 @@ async def handler(event):
 
 # ---------------- START ---------------------------
 
+async def healthcheck(request):
+    return web.Response(text="ok")
+
+async def start_health_server():
+    app = web.Application()
+    app.router.add_get("/", healthcheck)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+
+    port = int(os.environ.get("PORT", 8000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+    print(f"🌍 Health server listening on port {port}")
+
 async def main():
+    await start_health_server()
     await client.start(phone=phone)
     print(f"⚡ {VOID_MODEL} чат-тян запущена")
     await client.run_until_disconnected()
+
 
 asyncio.run(main())
