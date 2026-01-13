@@ -1,10 +1,7 @@
 import random
-import time
-import requests
-import json
-from telethon import TelegramClient, events
-import atexit
 import asyncio
+import aiohttp
+from telethon import TelegramClient, events
 
 api_id = 33100781
 api_hash = "851e421911ca88d83e20e276c953453c"
@@ -21,59 +18,62 @@ VOID_API_URL = "https://api.voidai.app/v1/chat/completions"
 VOID_MODEL = "gpt-5.1"  # пример, поменяешь если надо
 
 client = TelegramClient("boychat", api_id, api_hash, sequential_updates=True)
-loop = asyncio.get_event_loop()
-# ---------------- ПАМЯТЬ --------------------------
+
+# ---------------- MEMORY --------------------------
+
 chat_history = []
 MAX_HISTORY = 10
 
-# Инициализация переменной current_prompt
 current_prompt = "Ты милая няшка стесняшка. Максимум 3 предложения"
-# ---------------- LLM: QWEN3 1.7B ---------------------
-def ask_llm(prompt: str) -> str:
+
+# ---------------- LLM -----------------------------
+
+async def ask_llm(prompt: str) -> str:
     headers = {
         "Authorization": f"Bearer {VOID_API_KEY}",
         "Content-Type": "application/json"
     }
 
-    data = {
-        "model": VOID_MODEL,  # Используем новую модель gpt-5.2-chat-latest
+    payload = {
+        "model": VOID_MODEL,
         "messages": [
             {"role": "system", "content": "Привет бот"},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.9,  # Сделаем более творческий ответ
-        "max_tokens": 500,    # Увеличиваем количество токенов
-        "top_p": 0.9,         # Лучшая вероятность интересных ответов
-        "n": 1                # Количество вариантов ответа
+        "temperature": 0.9,
+        "max_tokens": 500,
+        "top_p": 0.9,
+        "n": 1
     }
 
     try:
-        # Отправка запроса
-        response = requests.post(VOID_API_URL, json=data, headers=headers, timeout=40)
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                VOID_API_URL,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=40)
+            ) as resp:
 
-        # Логирование полного ответа
-        print(f"Status Code: {response.status_code}")
-        print(f"Response Text: {response.text}")
+                if resp.status != 200:
+                    print("VoidAI error:", resp.status)
+                    return "Что-то пошло не так 😭"
 
-        if response.status_code == 200:
-            response_json = response.json()
-            content = response_json["choices"][0]["message"]["content"].strip()
-            if not content:
-                return "я пизда тупая добавь мне токены 😭"
-            return content
-        else:
-            print(f"Ошибка от VoidAI: {response.status_code}")
-            return "Что-то пошло не так 😭"
-    except requests.exceptions.RequestException as e:
-        print(f"Ошибка при подключении к VoidAI: {e}")
-        return "Что-то пошло не так, подожди немного... 😭"
+                data = await resp.json()
+                content = data["choices"][0]["message"]["content"].strip()
+                return content or "я пизда тупая добавь мне токены 😭"
 
-# ---------------- ПРОМПТ --------------------------
+    except asyncio.TimeoutError:
+        return "Сервер думает слишком долго 😭"
+    except Exception as e:
+        print("LLM error:", e)
+        return "Что-то сломалось 😭"
 
-# ---------------- ПРОМПТ --------------------------
-def build_prompt(username, text, prompt):
+# ---------------- PROMPT --------------------------
+
+def build_prompt(username: str, text: str, base_prompt: str) -> str:
     history_block = "\n".join(chat_history[-MAX_HISTORY:])
-    return f"""{prompt}
+    return f"""{base_prompt}
 
 Не говори что ты бот или ИИ.
 
@@ -85,20 +85,18 @@ def build_prompt(username, text, prompt):
 Ответь от первого лица.
 """
 
-# ---------------- ТРИГГЕРЫ ------------------------
+# ---------------- TRIGGERS ------------------------
 
 TRIGGERS_CALL = [
-    "@retransforgamebot", "бот", "ботик", "эй", "помоги", "вопрос", "Вопрос"
+    "@retransforgamebot", "бот", "ботик", "эй", "помоги", "вопрос"
 ]
 
 TRIGGERS_EMO = [
-    "бля", "пиздец", 
-    "устал", "устала", "плохо", "груст", "тяжко",
-    "капец", "не понимаю", "непон", 
-    "смешно", 
+    "бля", "пиздец", "устал", "устала", "плохо",
+    "груст", "тяжко", "капец", "не понимаю"
 ]
 
-def should_reply(username, text):
+def should_reply(username: str, text: str) -> bool:
     txt = text.lower()
 
     if username == BOT_USERNAME.lower():
@@ -110,27 +108,18 @@ def should_reply(username, text):
     if any(t in txt for t in TRIGGERS_EMO):
         return True
 
-    if random.random() < 0.1:
-        return True
-
-    return False
+    return random.random() < 0.1
 
 # ---------------- SEND ----------------------------
 
-def send_message(text):
-    requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
-        "chat_id": CHAT_ID,
-        "text": text
-    })
-
-async def send_message(text):
+async def send_message_tg(text: str):
     await client.send_message(CHAT_ID, text)
 
-# ---------------- TELETHON -------------------------
+# ---------------- HANDLER -------------------------
 
 @client.on(events.NewMessage(chats=CHAT_ID))
 async def handler(event):
-    global LAST_REPLY_TIME, current_prompt, chat_history
+    global current_prompt, chat_history
 
     sender = await event.get_sender()
     username = (sender.username or "").lower()
@@ -138,80 +127,65 @@ async def handler(event):
 
     print(f"\n>>> @{username}: {text}")
 
-    # Обработка команды /help
+    # /help
     if text == "/help@retransforgamebot":
-        send_message("Привет долбаеб! Спроси меня что угодно, отзываюсь на @retransforgamebot, 'бот', 'ботик', 'эй', 'помоги'")
+        await send_message_tg(
+            "Привет долбаеб! Спроси меня что угодно 😘"
+        )
         return
 
-# Проверяем, если сообщение соответствует формату /setprompt @retransforgamebot <текст>
+    # /setprompt
     if text.startswith("/setprompt@retransforgamebot"):
-        command_parts = text.split(" ", 1)
-        if len(command_parts) > 1 and command_parts[1].strip():  # Проверяем, если текст после команды не пустой
-            current_prompt = command_parts[1].strip()  # Устанавливаем новый промт
-            chat_history = []  # Очищаем историю чата при изменении промта
-            send_message(f"Промт успешно обновлен на: {current_prompt}")
+        parts = text.split(" ", 1)
+        if len(parts) > 1 and parts[1].strip():
+            current_prompt = parts[1].strip()
+            chat_history.clear()
+            await send_message_tg(f"Промт обновлён:\n{current_prompt}")
         else:
-            send_message("Текст для промта не может быть пустым!")
+            await send_message_tg("Промт не может быть пустым")
         return
 
-    # Сброс промта
-    elif text == "/resetprompt@retransforgamebot":
+    # /resetprompt
+    if text == "/resetprompt@retransforgamebot":
         current_prompt = "Ты — максимально отбитый, матерый зек при этом романтичный бандит."
-        chat_history = []  # Очищаем историю чата при сбросе промта
-        send_message("Промт сброшен к исходному состоянию.")
+        chat_history.clear()
+        await send_message_tg("Промт сброшен")
         return
 
-    # Показать текущий промт
-    elif text == "/showprompt@retransforgamebot":
-        send_message(f"Текущий промт: {current_prompt}")
+    # /showprompt
+    if text == "/showprompt@retransforgamebot":
+        await send_message_tg(f"Текущий промт:\n{current_prompt}")
         return
 
-     # Проверка на "томат" в разных регистрах
-    if "томат" in text.lower() and username != BOT_USERNAME.lower():  # Поиск по слову "томат" (не зависит от регистра)
-        print("Томат найден, бот отвечает...")
-        send_message("Томат лучший <3")
-        return  # Выход из обработчика, чтобы не выполнять дальнейшую обработку
-    
-    # if "сглып" in text.lower() and username != BOT_USERNAME.lower():  # Поиск по слову "томат" (не зависит от регистра)
-    #         print("Сглыпа найден, бот отвечает...")
-    #         send_message("Сглыпа хуесос")
-    #         return  # Выход из обработчика, чтобы не выполнять дальнейшую обработку
+    # томат
+    if "томат" in text.lower() and username != BOT_USERNAME.lower():
+        await send_message_tg("Томат лучший <3")
+        return
 
-
-    # сохраняем в память
+    # memory
     chat_history.append(f"{username}: {text}")
     if len(chat_history) > MAX_HISTORY:
         chat_history.pop(0)
 
-
-    # фильтр реакции
     if not should_reply(username, text):
         print("бот решил промолчать")
         return
 
     print("бот отвечает...")
 
-    prompt = build_prompt(username, text, current_prompt)  # Передаем актуальный промт в build_prompt
+    prompt = build_prompt(username, text, current_prompt)
     answer = await ask_llm(prompt)
 
     print("<<< BOT:", answer)
 
-    await send_message(answer)
-    
-    # мягкий антифлуд
+    await send_message_tg(answer)
     await asyncio.sleep(1.5)
-# ---------------- TEST ----------------------------
-
-# Запускаем тест для проверки правильности работы API
-def test_ask_llm():
-    prompt = "Привет, как дела?"
-    response = ask_llm(prompt)
-    print(f"Тестовый ответ: {response}")
-
-# Тестируем работу API
-test_ask_llm()  # Тестируем работу API
 
 # ---------------- START ---------------------------
-client.start(phone=phone)
-print(f"⚡ {VOID_MODEL} чат-тян запущена — отвечает быстро и по делу.")
-client.run_until_disconnected()
+
+async def main():
+    await client.start(phone=phone)
+    print(f"⚡ {VOID_MODEL} чат-тян запущена")
+    await client.run_until_disconnected()
+
+asyncio.run(main())
