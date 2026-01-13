@@ -9,7 +9,7 @@ api_id = 33100781
 api_hash = "851e421911ca88d83e20e276c953453c"
 phone = "+79897939606"
 BOT_TOKEN = "8275700528:AAECybc5-QPbiXS4ZO9NmJ_-Hapk_GnexI0"
-CHAT_ID = -1003204357813
+CHAT_ID = -1001183977989
 BOT_USERNAME = "retransforgamebot"
 BOT_ID = None
 
@@ -115,14 +115,9 @@ TRIGGERS_CALL = [
 ]
 
 TRIGGERS_EMO = [
-    "бля",
-    "пиздец",
     "устал",
     "устала",
-    "плохо",
-    "груст",
-    "тяжко",
-    "капец",
+    "плохо"
 ]
 
 def should_reply(username: str, text: str) -> bool:
